@@ -1,12 +1,24 @@
 from .base import BaseBackend
 from .torch_backend import TorchBackend
 from .sklearn_backend import SklearnBackend
+from .hf_backend import HFBackend
+
+try:
+    from transformers import PreTrainedModel
+except ImportError:
+    PreTrainedModel = None
 
 
 def create_backend(model, backend: str, logger=None) -> BaseBackend:
     """
     Se backend='auto' prova a riconoscere il tipo di modello.
     """
+
+    # ---------- HuggingFace ---------- #
+    if backend in ("hf", "auto") and PreTrainedModel is not None:
+        if isinstance(model, PreTrainedModel):
+            return HFBackend(model, logger=logger)
+
     # ---------- PyTorch ---------- #
     if backend in ("torch", "auto"):
         try:
