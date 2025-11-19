@@ -26,7 +26,7 @@ class FlopsTracker:
     def __init__(self, run_name: Optional[str] = None):
         self.run_name = run_name
         self._raw_flops: int = 0
-        self._total_flops: float = 0.0  # per estensioni future
+        self._total_flops: float = 0.0 
         self._history: dict[str, Any] = {}
 
     @property
