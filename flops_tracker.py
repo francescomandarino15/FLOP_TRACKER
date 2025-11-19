@@ -47,90 +47,6 @@ class FlopsTracker:
     def history(self) -> dict[str, Any]:
         return self._history
 
-    # -------------------- SKLEARN BIND -------------------- #
-
-    def sklearn_bind(
-        self,
-        model,
-        X,
-        y=None,
-        *,
-        mode: str = "fit",  # "fit", "predict" o "fit_predict"
-        backend: str = "sklearn",
-        log_per_call: bool = True,
-        export_path: Optional[str] = None,
-        use_wandb: bool = False,
-        wandb_project: Optional[str] = None,
-        wandb_token: Optional[str] = None,
-    ) -> "FlopsTracker":
-        """
-        Esegue fit/predict per un modello sklearn e traccia i FLOPs.
-
-        Esempi:
-            ft = FlopsTracker(run_name="lr").sklearn_bind(
-                model=clf,
-                X=X_train,
-                y=y_train,
-                mode="fit",
-                log_per_call=True,
-                export_path="flops_lr.csv",
-            )
-
-            ft = FlopsTracker(run_name="knn").sklearn_bind(
-                model=knn,
-                X=X_test,
-                mode="predict",
-            )
-
-        Ogni chiamata a fit/predict viene trattata come un "batch"
-        nei log del backend sklearn.
-        """
-
-        from .tracker import Tracker
-
-        log_per_batch = log_per_call
-        log_per_epoch = False  
-        with Tracker(
-            model=model,
-            backend=backend,
-            log_per_batch=log_per_batch,
-            log_per_epoch=log_per_epoch,
-            export_path=export_path,
-            use_wandb=use_wandb,
-            wandb_project=wandb_project,
-            wandb_token=wandb_token,
-            run_name=self.run_name,
-        ) as tr:
-
-            # eseguiamo fit/predict secondo la modalità scelta
-            if mode == "fit":
-                model.fit(X, y)
-            elif mode == "predict":
-                _ = model.predict(X)
-            elif mode == "fit_predict":
-                model.fit(X, y)
-                _ = model.predict(X)
-            else:
-                raise ValueError(f"Modo sklearn_bind non supportato: {mode}")
-
-            self._raw_flops = tr.total_flops
-            self._total_flops = float(self._raw_flops)
-
-            self._history["backend"] = backend
-            self._history["export_path"] = export_path
-            self._history["use_wandb"] = use_wandb
-            self._history["wandb_project"] = wandb_project
-            self._history["mode"] = mode
-
-        run_label = f"[{self.run_name}]" if self.run_name is not None else ""
-        print(
-            f"[FlopsTracker{run_label}] FLOPs totali (sklearn, mode={mode}): "
-            f"{self._total_flops:.0f} (raw: {self._raw_flops})"
-        )
-
-        return self
-
-
     # -------------------- TORCH BIND -------------------- #
 
     def torch_bind(
@@ -214,3 +130,200 @@ class FlopsTracker:
         )
 
         return self
+
+    # -------------------- HF BIND -------------------- #
+
+    def hf_bind(
+        self,
+        model,
+        dataloader,
+        optimizer=None,
+        device: Optional[str] = None,
+        *,
+        epochs: int = 1,
+        backend: str = "hf",
+        log_per_batch: bool = False,
+        log_per_epoch: bool = False,
+        export_path: Optional[str] = None,
+        use_wandb: bool = False,
+        wandb_project: Optional[str] = None,
+        wandb_token: Optional[str] = None,
+    ) -> "FlopsTracker":
+        """
+        Esegue training / inferenza per un modello HuggingFace (transformers),
+        stimando i FLOPs.
+
+        Assunzioni:
+        - dataloader restituisce dict con chiavi tipo:
+          "input_ids", "attention_mask", "labels", ecc.
+        - se il model restituisce un oggetto con attributo .loss
+          e optimizer non è None, facciamo training:
+            loss = output.loss; loss.backward(); optimizer.step().
+        - se optimizer è None, facciamo solo forward (inferenza).
+
+        Uso tipico:
+
+            ft = FlopsTracker(run_name="bert_mrpc").hf_bind(
+                model=model,
+                dataloader=train_loader,
+                optimizer=optimizer,
+                device="cuda",
+                epochs=3,
+                log_per_batch=True,
+                export_path="bert_flops.csv",
+                use_wandb=True,
+                wandb_project="flops-thesis",
+            )
+        """
+
+        if device is not None:
+            model.to(device)
+
+        from .tracker import Tracker
+
+        with Tracker(
+            model=model,
+            backend=backend,
+            log_per_batch=log_per_batch,
+            log_per_epoch=log_per_epoch,
+            export_path=export_path,
+            use_wandb=use_wandb,
+            wandb_project=wandb_project,
+            wandb_token=wandb_token,
+            run_name=self.run_name,
+        ) as tr:
+
+            for epoch in range(epochs):
+                if hasattr(tr.backend, "set_epoch"):
+                    tr.backend.set_epoch(epoch)
+
+                for batch in dataloader:
+                    # spostiamo tutti i tensori su device
+                    if device is not None:
+                        batch = {
+                            k: (v.to(device) if hasattr(v, "to") else v)
+                            for k, v in batch.items()
+                        }
+
+                    if optimizer is not None:
+                        optimizer.zero_grad()
+
+                    output = model(**batch)
+
+                    # se l'output ha 'loss' e c’è un optimizer, facciamo training
+                    loss = getattr(output, "loss", None)
+                    if loss is not None and optimizer is not None:
+                        loss.backward()
+                        optimizer.step()
+
+                # log per epoch HF (se richiesto)
+                if tr.logger is not None and hasattr(tr.logger, "log_epoch"):
+                    tr.logger.log_epoch(
+                        epoch=epoch,
+                        flops=tr.total_flops,
+                        cumulative_flops=tr.total_flops,
+                    )
+
+            self._raw_flops = tr.total_flops
+            self._total_flops = float(self._raw_flops)
+
+            self._history["backend"] = backend
+            self._history["export_path"] = export_path
+            self._history["use_wandb"] = use_wandb
+            self._history["wandb_project"] = wandb_project
+            self._history["epochs"] = epochs
+            self._history["hf_mode"] = "train" if optimizer is not None else "inference"
+
+        run_label = f"[{self.run_name}]" if self.run_name is not None else ""
+        mode_label = "train" if optimizer is not None else "inference"
+        print(
+            f"[FlopsTracker{run_label}] FLOPs totali (HF, mode={mode_label}): "
+            f"{self._total_flops:.0f} (raw: {self._raw_flops})"
+        )
+
+        return self
+
+ # -------------------- SKLEARN BIND -------------------- #
+
+    def sklearn_bind(
+        self,
+        model,
+        X,
+        y=None,
+        *,
+        mode: str = "fit",  # "fit", "predict" o "fit_predict"
+        backend: str = "sklearn",
+        log_per_call: bool = True,
+        export_path: Optional[str] = None,
+        use_wandb: bool = False,
+        wandb_project: Optional[str] = None,
+        wandb_token: Optional[str] = None,
+    ) -> "FlopsTracker":
+        """
+        Esegue fit/predict per un modello sklearn e traccia i FLOPs.
+
+        Esempi:
+            ft = FlopsTracker(run_name="lr").sklearn_bind(
+                model=clf,
+                X=X_train,
+                y=y_train,
+                mode="fit",
+                log_per_call=True,
+                export_path="flops_lr.csv",
+            )
+
+            ft = FlopsTracker(run_name="knn").sklearn_bind(
+                model=knn,
+                X=X_test,
+                mode="predict",
+            )
+
+        Ogni chiamata a fit/predict viene trattata come un "batch"
+        nei log del backend sklearn.
+        """
+
+        from .tracker import Tracker
+
+        log_per_batch = log_per_call
+        log_per_epoch = False  
+        with Tracker(
+            model=model,
+            backend=backend,
+            log_per_batch=log_per_batch,
+            log_per_epoch=log_per_epoch,
+            export_path=export_path,
+            use_wandb=use_wandb,
+            wandb_project=wandb_project,
+            wandb_token=wandb_token,
+            run_name=self.run_name,
+        ) as tr:
+
+            # eseguiamo fit/predict secondo la modalità scelta
+            if mode == "fit":
+                model.fit(X, y)
+            elif mode == "predict":
+                _ = model.predict(X)
+            elif mode == "fit_predict":
+                model.fit(X, y)
+                _ = model.predict(X)
+            else:
+                raise ValueError(f"Modo sklearn_bind non supportato: {mode}")
+
+            self._raw_flops = tr.total_flops
+            self._total_flops = float(self._raw_flops)
+
+            self._history["backend"] = backend
+            self._history["export_path"] = export_path
+            self._history["use_wandb"] = use_wandb
+            self._history["wandb_project"] = wandb_project
+            self._history["mode"] = mode
+
+        run_label = f"[{self.run_name}]" if self.run_name is not None else ""
+        print(
+            f"[FlopsTracker{run_label}] FLOPs totali (sklearn, mode={mode}): "
+            f"{self._total_flops:.0f} (raw: {self._raw_flops})"
+        )
+
+        return self
+
+
