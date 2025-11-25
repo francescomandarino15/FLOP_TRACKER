@@ -22,25 +22,25 @@ class WandbLogger(BaseLogger):
             self._wandb = wandb
             self.run = wandb.init(project=project, name=run_name)
 
-    def log_batch(self, step, flops, cumulative_flops, epoch=None):
+    def log_batch(self, step, flop, cumulative_flop, epoch=None):
         if not self.log_per_batch or self._wandb is None:
             return
         self._wandb.log(
             {
-                "flops_batch": flops,
-                "flops_cumulative": cumulative_flops,
+                "flop_batch": flop,
+                "flop_cumulative": cumulative_flop,
                 "batch_step": step,
                 "epoch": epoch,
             }
         )
 
-    def log_epoch(self, epoch, flops, cumulative_flops):
+    def log_epoch(self, epoch, flop, cumulative_flop):
         if not self.log_per_epoch or self._wandb is None:
             return
         self._wandb.log(
             {
-                "flops_epoch": flops,
-                "flops_cumulative": cumulative_flops,
+                "flop_epoch": flop,
+                "flop_cumulative": cumulative_flop,
                 "epoch": epoch,
             }
         )
