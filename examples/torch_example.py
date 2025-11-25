@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from flops_tracker import FlopsTracker
+from flop_tracker import FlopTracker
 
 
 class SimpleCNN(nn.Module):
@@ -43,7 +43,7 @@ def main():
     loss_fn = nn.CrossEntropyLoss()
 
     # Tracciamento totalmente trasparente
-    ft = FlopsTracker(run_name="torch_cnn_example").torch_bind(
+    ft = FlopTracker(run_name="torch_cnn_example").torch_bind(
         model=model,
         optimizer=optimizer,
         loss_fn=loss_fn,
@@ -52,12 +52,12 @@ def main():
         epochs=2,
         log_per_batch=True,
         log_per_epoch=True,
-        export_path="torch_cnn_flops.csv",
+        export_path="torch_cnn_flop.csv",
         use_wandb=False,
     )
 
-    print("Raw FLOPs:", ft.raw_flops)
-    print("Total FLOPs:", ft.total_flops)
+    print("Raw FLOP:", ft.raw_flop)
+    print("Total FLOP:", ft.total_flop)
 
 
 if __name__ == "__main__":
