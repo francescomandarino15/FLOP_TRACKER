@@ -11,7 +11,7 @@ class Tracker(AbstractContextManager):
 
     - Instanzia backend e logger
     - Aggancia gli hook
-    - Espone total_flops
+    - Espone total_flop
     """
 
     def __init__(
@@ -48,5 +48,5 @@ class Tracker(AbstractContextManager):
             self.logger.close()
         return False 
     @property
-    def total_flops(self) -> int:
-        return self.backend.get_total_flops()
+    def total_flop(self) -> int:
+        return self.backend.get_total_flop()
