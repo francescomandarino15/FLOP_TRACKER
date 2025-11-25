@@ -5,10 +5,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-# Rende importabile flops_tracker.py dalla cartella superiore (FLOPs_TRACKER)
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from flops_tracker import FlopsTracker
-
+from flop_tracker import FlopTracker
 
 class ComplexNet(nn.Module):
     """
@@ -28,14 +26,14 @@ class ComplexNet(nn.Module):
     def __init__(self, num_classes: int = 10, img_size: int = 32):
         super().__init__()
 
-        # 1) Sezione "vision" (CNN + padding + pooling + batchnorm + pixel shuffle)
-        self.pad = nn.ZeroPad2d(1)  # padding 1 pixel su tutti i lati
+       
+        self.pad = nn.ZeroPad2d(1)  
 
         self.conv_block1 = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=0),  # dopo ZeroPad2d
+            nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=0), 
             nn.BatchNorm2d(16),
             nn.ReLU(),
-            nn.MaxPool2d(2),  # dimezza H,W
+            nn.MaxPool2d(2),  
         )
 
         self.conv_block2 = nn.Sequential(
@@ -45,20 +43,15 @@ class ComplexNet(nn.Module):
             nn.Dropout2d(p=0.1),
         )
 
-        # PixelShuffle richiede canali = r^2 * C_out
-        # Qui aumentiamo i canali e poi shuffliamo
-        self.pre_shuffle = nn.Conv2d(32, 32 * 4, kernel_size=1)  # 4 = r^2 con r=2
-        self.pixel_shuffle = nn.PixelShuffle(upscale_factor=2)   # upsample spaziale
+        self.pre_shuffle = nn.Conv2d(32, 32 * 4, kernel_size=1)  
+        self.pixel_shuffle = nn.PixelShuffle(upscale_factor=2)   
 
-        # Riduciamo di nuovo la dimensione spaziale
         self.pool2 = nn.AdaptiveAvgPool2d((8, 8))
 
-        # 2) Flatten + Linear per ottenere una rappresentazione "sequenza"
         conv_out_dim = 32 * 8 * 8
         self.flatten = nn.Flatten()
         self.fc_to_seq = nn.Linear(conv_out_dim, 128)  # 128 = L * d_model
 
-        # 3) LayerNorm + TransformerEncoderLayer
         self.d_model = 32
         self.seq_len = 4  # 4 * 32 = 128
         self.layernorm = nn.LayerNorm(self.d_model)
@@ -72,7 +65,6 @@ class ComplexNet(nn.Module):
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=1)
 
-        # 4) LSTM ricorrente sulla sequenza trasformata
         self.lstm = nn.LSTM(
             input_size=self.d_model,
             hidden_size=64,
@@ -83,59 +75,58 @@ class ComplexNet(nn.Module):
 
         self.dropout = nn.Dropout(p=0.2)
 
-        # 5) Classificatore finale
         self.classifier = nn.Linear(64, num_classes)
 
     def forward(self, x):
-        # x: (batch, 3, 32, 32)
+        
         # 1) CNN + padding + pooling + pixel shuffle
-        x = self.pad(x)                # -> (B, 3, 34, 34)
-        x = self.conv_block1(x)        # -> (B, 16, 17, 17) -> pool -> (B, 16, ~8, ~8)
-        x = self.conv_block2(x)        # -> (B, 32, 8, 8) circa
+        x = self.pad(x)               
+        x = self.conv_block1(x)       
+        x = self.conv_block2(x)       
 
-        x = self.pre_shuffle(x)        # -> (B, 32*4, 8, 8)
-        x = self.pixel_shuffle(x)      # -> (B, 32, 16, 16)
-        x = self.pool2(x)              # -> (B, 32, 8, 8)
+        x = self.pre_shuffle(x)        
+        x = self.pixel_shuffle(x)      
+        x = self.pool2(x)              
 
-        # 2) Flatten + Linear -> vettore di dimensione 128
-        x = self.flatten(x)            # (B, 32*8*8)
-        x = self.fc_to_seq(x)          # (B, 128)
+        # 2) Flatten + Linear 
+        x = self.flatten(x)            
+        x = self.fc_to_seq(x)         
 
         # 3) Interpretiamo il vettore come sequenza (B, L, d_model)
-        x = x.view(-1, self.seq_len, self.d_model)  # (B, 4, 32)
-        x = self.layernorm(x)         # (B, 4, 32)
-        x = self.transformer_encoder(x)  # (B, 4, 32)
+        x = x.view(-1, self.seq_len, self.d_model) 
+        x = self.layernorm(x)        
+        x = self.transformer_encoder(x)  
 
         # 4) LSTM sulla sequenza
-        x, (h_n, c_n) = self.lstm(x)  # x: (B, 4, 64), h_n: (1, B, 64)
+        x, (h_n, c_n) = self.lstm(x)  
         # Prendiamo lo stato nascosto finale
-        h_last = h_n[-1]              # (B, 64)
+        h_last = h_n[-1]              
 
         h_last = self.dropout(h_last)
 
         # 5) Classificatore finale
-        logits = self.classifier(h_last)  # (B, num_classes)
+        logits = self.classifier(h_last)  
         return logits
 
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Dataset fittizio: immagini 32x32 RGB, 10 classi
+    # Dataset: immagini 32x32 RGB, 10 classi
     x = torch.randn(256, 3, 32, 32)
     y = torch.randint(0, 10, (256,))
     ds = TensorDataset(x, y)
     train_loader = DataLoader(ds, batch_size=32, shuffle=True)
 
     model = ComplexNet(num_classes=10)
-    # Supporto opzionale DataParallel (se hai più GPU)
+    # Supporto opzionale DataParallel 
     if torch.cuda.is_available() and torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
 
-    ft = FlopsTracker(run_name="torch_complex_model").torch_bind(
+    ft = FlopTracker(run_name="torch_complex_model").torch_bind(
         model=model,
         optimizer=optimizer,
         loss_fn=loss_fn,
@@ -145,13 +136,9 @@ def main():
         backend="torch",
         log_per_batch=True,
         log_per_epoch=True,
-        export_path="torch_complex_model_flops.csv",
+        export_path="torch_complex_model_flop.csv",
         use_wandb=False,
     )
-
-    # opzionali: il tracker stampa già i FLOPs totali
-    print("Raw FLOPs:", ft.raw_flops)
-    print("Total FLOPs:", ft.total_flops)
 
 
 if __name__ == "__main__":
