@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.datasets import make_classification
 from sklearn.linear_model import LogisticRegression
 
-from flops_tracker import FlopsTracker
+from flop_tracker import FlopTracker
 
 
 def main():
@@ -16,24 +16,24 @@ def main():
 
     clf = LogisticRegression(max_iter=1000)
 
-    # Tracciamo FLOPs del fit
-    ft_fit = FlopsTracker(run_name="sklearn_logreg_fit").sklearn_bind(
+    # Tracciamo FLOP del fit
+    ft_fit = FlopTracker(run_name="sklearn_logreg_fit").sklearn_bind(
         model=clf,
         X=X,
         y=y,
         mode="fit",
         log_per_call=True,
-        export_path="sklearn_logreg_fit_flops.csv",
+        export_path="sklearn_logreg_fit_flop.csv",
         use_wandb=False,
     )
 
-    # Tracciamo FLOPs del predict
-    ft_pred = FlopsTracker(run_name="sklearn_logreg_predict").sklearn_bind(
+    # Tracciamo FLOP del predict
+    ft_pred = FlopTracker(run_name="sklearn_logreg_predict").sklearn_bind(
         model=clf,
         X=X,
         mode="predict",
         log_per_call=True,
-        export_path="sklearn_logreg_predict_flops.csv",
+        export_path="sklearn_logreg_predict_flop.csv",
         use_wandb=False,
     )
 
