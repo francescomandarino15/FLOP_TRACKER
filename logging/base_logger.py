@@ -8,11 +8,11 @@ class BaseLogger(ABC):
         self.log_per_epoch = log_per_epoch
 
     @abstractmethod
-    def log_batch(self, step: int, flops: int, cumulative_flops: int, epoch: int | None = None):
+    def log_batch(self, step: int, flop: int, cumulative_flop: int, epoch: int | None = None):
         ...
 
     @abstractmethod
-    def log_epoch(self, epoch: int, flops: int, cumulative_flops: int):
+    def log_epoch(self, epoch: int, flop: int, cumulative_flop: int):
         ...
 
     @abstractmethod
